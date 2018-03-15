@@ -53,7 +53,8 @@ class QAModel(object):
         self.FLAGS = FLAGS
         self.id2word = id2word
         self.word2id = word2id
-        self.char_vocab = 42
+        _, _, num_chars = self.create_char_dicts()
+        self.char_vocab = num_chars
 
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
@@ -562,14 +563,14 @@ class QAModel(object):
 
         ##Create reverse char2idx
         char2idx = {v: k for k, v in idx2char.iteritems()}
-        return char2idx, idx2char
+        return char2idx, idx2char, num_chars
 
     def word_to_token_ids(self, word):
         """Turns a word into char idxs
             e.g. "know" -> [9, 32, 16, 96]
             Note any token that isn't in the char2idx mapping gets mapped to the id for UNK_CHAR
             """
-        char2idx, idx2char = self.create_char_dicts()
+        char2idx, idx2char, _ = self.create_char_dicts()
         char_tokens = list(word)  # list of chars in word
         char_ids = [char2idx.get(w, 1) for w in char_tokens]
         return char_tokens, char_ids
