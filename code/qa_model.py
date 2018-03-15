@@ -127,7 +127,7 @@ class QAModel(object):
 
         """
 
-        def conv1d(input_, output_size, width, stride, scope):
+        def conv1d(input_, output_size, width, stride, scope_name):
             '''
             :param input_: A tensor of embedded tokens with shape [batch_size,max_length,embedding_size]
             :param output_size: The number of feature maps we'd like to calculate
@@ -142,7 +142,7 @@ class QAModel(object):
             input_ = tf.expand_dims(input_, axis=1)  # Change the shape to [batch_size,1,max_length,output_size]
 
             # Make sure the height of the filter is 1
-            with tf.variable_scope(scope=scope, reuse=tf.AUTO_REUSE):
+            with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
                 filter_ = tf.get_variable("conv_filter", shape=[1, width, inputSize, output_size])
 
             # Run the convolution as if this were an image
@@ -183,7 +183,7 @@ class QAModel(object):
 
             ## Now implement convolution. I decided to use conv2d through the function conv1d above since that was more intuitive
 
-            self.context_emb_out = conv1d(input_= self.context_char_embs, output_size = self.FLAGS.char_out_size,  width =self.FLAGS.window_width , stride=1, scope='char-cnn')
+            self.context_emb_out = conv1d(input_= self.context_char_embs, output_size = self.FLAGS.char_out_size,  width =self.FLAGS.window_width , stride=1, scope_name='char-cnn')
 
             # mu = 0
             # sigma = 1.0
@@ -214,7 +214,7 @@ class QAModel(object):
             print("Shape context embs after pooling", self.context_emb_out.shape)
 
             self.qn_emb_out = conv1d(input_=self.qn_char_embs, output_size=self.FLAGS.char_out_size,
-                                          width=self.FLAGS.window_width, stride=1, scope='char-cnn') #reuse weights b/w context and ques conv layers
+                                          width=self.FLAGS.window_width, stride=1, scope_name='char-cnn') #reuse weights b/w context and ques conv layers
 
             # self.qn_emb_out = tf.nn.conv2d(self.qn_char_embs, conv1_W, strides=[1, 1, 1, 1],
             #                                     padding='VALID') + conv1_b
@@ -265,16 +265,32 @@ class QAModel(object):
             self.qn_embs = tf.concat((self.qn_embs, self.qn_emb_out), axis=2)
             print("Shape - concatenated qn embs", self.qn_embs.shape)
 
-        # if self.FLAGS.add_highway_layer:
-        #     with tf.variable_scope("highway"):
-        #         self.context_embs = highway_network(self.context_embs , config.highway_num_layers, True, wd=config.wd, is_train=self.is_train)
-        #         tf.get_variable_scope().reuse_variables()
-        #         self.qn_embs = highway_network(self.qn_embs, config.highway_num_layers, True, wd=config.wd, is_train=self.is_train)
+        if self.FLAGS.add_highway_layer:
+            last_dim_concat = self.context_embs.get_shape().as_list()[-1]
+            for i in range(2):
+                #add two highway layers or repeat process twice
+                self.context_embs = self.highway(self.context_embs, last_dim_concat, scope_name='highway', carry_bias=-1.0)
+                #reuse variables for qn_embs
+                self.qn_embs = self.highway(self.qn_embs, last_dim_concat, scope_name='highway', carry_bias=-1.0)
 
         encoder = RNNEncoder(self.FLAGS.hidden_size_encoder, self.keep_prob)
-        context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+        context_hiddens = encoder.build_graph(self.context_embs, self.context_mask, scopename='RNNEncoder') # (batch_size, context_len, hidden_size*2)
+        question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask, scopename='RNNEncoder') # (batch_size, question_len, hidden_size*2)
 
+        if self.FLAGS.cnn_encoder:
+            ## Use CNN to also generate encodings
+            cnn_encoder = CNNEncoder(self.FLAGS.filter_size_encoder, self.keep_prob)
+            context_cnn_hiddens = cnn_encoder.build_graph(self.context_embs, self.FLAGS.context_len, scope_name='context-encoder')  # (batch_size, context_len, hidden_size*2)
+            print("Shape - Context Encoder output", context_cnn_hiddens.shape)
+
+            ques_cnn_hiddens = cnn_encoder.build_graph(self.qn_embs, self.FLAGS.question_len,
+                                                       scope_name='ques-encoder')  # (batch_size, context_len, hidden_size*2)
+            print("Shape - Ques Encoder output", ques_cnn_hiddens.shape)
+
+            ## concat these vectors
+            context_hiddens = tf.concat((context_hiddens, context_cnn_hiddens), axis = 2)  # Just use these output for now. Ignore the RNN output
+            question_hiddens = tf.concat((question_hiddens, ques_cnn_hiddens), axis = 2)   # Just use these output for now
+            print("Shape - Context Hiddens", context_hiddens.shape)
 
         if self.FLAGS.rnet_attention:  ##perform Question Passage and Self Matching attention from R-Net
 
@@ -289,17 +305,37 @@ class QAModel(object):
             # Blended reps for R-Net
             blended_reps = tf.concat([context_hiddens, v_P, h_P], axis=2)  # (batch_size, context_len, hidden_size*6)
 
+        elif self.FLAGS.bidaf_attention:
+
+            attn_layer = BiDAF(self.keep_prob, self.FLAGS.hidden_size_encoder * 2)
+            attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,
+                                                 self.context_mask)  # attn_output is shape (batch_size, context_len, hidden_size_encoder*6)
+            blended_reps = tf.concat([context_hiddens, attn_output], axis=2)  # (batch_size, context_len, hidden_size_encoder*8)
+
+            ## add a modeling layer
+            modeling_layer = RNNEncoder(self.FLAGS.hidden_size_modeling, self.keep_prob)
+            attention_hidden = modeling_layer.build_graph(blended_reps,
+                                                  self.context_mask, scopename='bidaf_modeling')  # (batch_size, context_len, hidden_size*2)
+
+            blended_reps = attention_hidden # for the final layer
+
+
         else: ## perform baseline dot product attention
 
             # Use context hidden states to attend to question hidden states - Basic Attention
-            attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size_encoder * 2,
-                                   self.FLAGS.hidden_size_encoder * 2)
+
+            last_dim = context_hiddens.get_shape().as_list()[-1]
+            print("last dim", last_dim)
+
+            attn_layer = BasicAttn(self.keep_prob, last_dim,
+                                   last_dim)
             _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask,
                                                     context_hiddens)  # attn_output is shape (batch_size, context_len, hidden_size*2)
 
 
             # Concat attn_output to context_hiddens to get blended_reps
             blended_reps = tf.concat([context_hiddens, attn_output], axis=2)  # (batch_size, context_len, hidden_size*4)
+
 
         if self.FLAGS.answer_pointer_RNET:  ##Use Answer Pointer Module from R-Net
 
@@ -594,6 +630,34 @@ class QAModel(object):
             charids_batch.append(charids_line)
 
         return charids_batch
+
+    def matrix_multiplication(self, mat, weight):
+        # [batch_size, seq_len, hidden_size] * [hidden_size, p] = [batch_size, seq_len, p]
+
+        mat_shape = mat.get_shape().as_list()  # shape - ijk
+        weight_shape = weight.get_shape().as_list()  # shape -kl
+        assert (mat_shape[-1] == weight_shape[0])
+        mat_reshape = tf.reshape(mat, [-1, mat_shape[-1]])  # [batch_size * n, m]
+        mul = tf.matmul(mat_reshape, weight)  # [batch_size * n, p]
+        return tf.reshape(mul, [-1, mat_shape[1], weight_shape[-1]])  # reshape to batch_size, seq_len, p
+
+    def highway(self, x, size, scope_name, carry_bias=-1.0):
+
+        with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE):
+            W_T = tf.Variable(tf.truncated_normal([size, size], stddev=0.1), name="weight_transform")
+            b_T = tf.Variable(tf.constant(carry_bias, shape=[size]), name="bias_transform")
+
+            W = tf.Variable(tf.truncated_normal([size, size], stddev=0.1), name="weight")
+            b = tf.Variable(tf.constant(0.1, shape=[size]), name="bias")
+
+        T = tf.sigmoid(self.matrix_multiplication(x, W_T) + b_T, name="transform_gate")
+        H = tf.nn.relu(self.matrix_multiplication(x, W) + b, name="activation")
+
+        print("shape H, T: ", H.shape, T.shape)
+        C = tf.subtract(1.0, T, name="carry_gate")
+
+        y = tf.add(tf.multiply(H, T), tf.multiply(x, C), "y")
+        return y
 
 
     def get_dev_loss(self, session, dev_context_path, dev_qn_path, dev_ans_path):

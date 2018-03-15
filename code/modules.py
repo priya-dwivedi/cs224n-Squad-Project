@@ -49,7 +49,7 @@ class RNNEncoder(object):
         self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
-    def build_graph(self, inputs, masks):
+    def build_graph(self, inputs, masks, scopename):
         """
         Inputs:
           inputs: Tensor shape (batch_size, seq_len, input_size)
@@ -61,7 +61,7 @@ class RNNEncoder(object):
           out: Tensor shape (batch_size, seq_len, hidden_size*2).
             This is all hidden states (fw and bw hidden states are concatenated).
         """
-        with vs.variable_scope("RNNEncoder"):
+        with vs.variable_scope(scopename):
             input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
 
             # Note: fw_out and bw_out are the hidden states for every timestep.
@@ -82,20 +82,44 @@ class CNNEncoder(object):
     Use CNN to generate encodings for each sentence
     """
 
-    def __init__(self, hidden_size, keep_prob):
+    def __init__(self, num_filters, keep_prob):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
           keep_prob: Tensor containing a single scalar that is the keep probability (for dropout)
         """
-        self.hidden_size = hidden_size
+        self.num_filters = num_filters
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
-        self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
-        self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
+        self.kernel_sizes = [2,3,4,5,6,7,8,9,15,20]
 
-    def build_graph(self, inputs, masks):
+
+    ## Helper function to create conv1d layer
+
+    def conv1d(input_, output_size, width, stride, scope):
+        '''
+        :param input_: A tensor of embedded tokens with shape [batch_size,max_length,embedding_size]
+        :param output_size: The number of feature maps we'd like to calculate
+        :param width: The filter width
+        :param stride: The stride
+        :return: A tensor of the concolved input with shape [batch_size,max_length,output_size]
+        '''
+        inputSize = input_.get_shape()[
+            -1]  # How many channels on the input (The size of our embedding for instance)
+
+        # This is the kicker where we make our text an image of height 1
+        input_ = tf.expand_dims(input_, axis=1)  # Change the shape to [batch_size,1,max_length,output_size]
+
+        # Make sure the height of the filter is 1
+        with tf.variable_scope(scope=scope, reuse=tf.AUTO_REUSE):
+            filter_ = tf.get_variable("conv_filter", shape=[1, width, inputSize, output_size])
+
+        # Run the convolution as if this were an image
+        convolved = tf.nn.conv2d(input_, filter=filter_, strides=[1, 1, stride, 1], padding="VALID")
+        # Remove the extra dimension, eg make the shape [batch_size,max_length,output_size]
+        result = tf.squeeze(convolved, axis=1)
+        return result
+
+    def build_graph(self, inputs, vec_len, scope_name):
         """
         Inputs:
           inputs: Tensor shape (batch_size, seq_len, input_size)
@@ -107,20 +131,159 @@ class CNNEncoder(object):
           out: Tensor shape (batch_size, seq_len, hidden_size*2).
             This is all hidden states (fw and bw hidden states are concatenated).
         """
-        with vs.variable_scope("RNNEncoder"):
-            input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
+        conv_outputs = []
+        input_shape = inputs.get_shape().as_list()  # shape - batch_size, context/ques_len, embedding_dim
+        inputs_expanded = tf.expand_dims(inputs, 1)  # becomes - batch_size, 1, context/ques_len, embedding_dim
+        print("Shape before convolution ", inputs_expanded.shape)
 
-            # Note: fw_out and bw_out are the hidden states for every timestep.
-            # Each is shape (batch_size, seq_len, hidden_size).
-            (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw, self.rnn_cell_bw, inputs, input_lens, dtype=tf.float32)
+        # with vs.variable_scope(scope=scope_name):
+        conv_outputs = []
+        for i, filter_size in enumerate(self.kernel_sizes):
+            print("filter size is: ", filter_size)
+            with tf.name_scope("conv-encoder-%s" % filter_size):
+                # Convolution Layer
 
-            # Concatenate the forward and backward hidden states
-            out = tf.concat([fw_out, bw_out], 2)
+                if i ==0: # first convolution
+                    input_shape = inputs_expanded.get_shape().as_list()
+                    filter_shape = [1, filter_size, input_shape[-1], self.num_filters]
+                    W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+                    b = tf.Variable(tf.constant(0.1, shape=[self.num_filters]), name="b")
+                    conv = tf.nn.conv2d(
+                        inputs_expanded,
+                        W,
+                        strides=[1, 1, 1, 1],
+                        padding="SAME",
+                        name="conv")
+                    # Apply nonlinearity
+                    conv = tf.nn.tanh(tf.nn.bias_add(conv, b), name="tanh")
+                    drop  = tf.nn.dropout(conv, self.keep_prob)
+                    print("Shape after convolution ", drop.shape)
+                     #pass the results of convolution again back in for the next kernel size
+                    # No max poooling is done to preserve input size
+                    conv_outputs.append(drop)
+                else:  # repeat convolutions on conv
+                    input_shape = conv.get_shape().as_list()
+                    filter_shape = [1, filter_size, input_shape[-1], self.num_filters]
+                    W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+                    b = tf.Variable(tf.constant(0.1, shape=[self.num_filters]), name="b")
+                    conv = tf.nn.conv2d(
+                        conv,
+                        W,
+                        strides=[1, 1, 1, 1],
+                        padding="SAME",
+                        name="conv")
+                    # Apply nonlinearity
+                    conv = tf.nn.tanh(tf.nn.bias_add(conv, b), name="tanh")
+                    drop = tf.nn.dropout(conv, self.keep_prob)
+                    print("Shape after convolution ", drop.shape)
+                    # pass the results of convolution again back in for the next kernel size
+                    # No max poooling is done to preserve input size
+                    conv_outputs.append(drop)
+
+        # Combine all the pooled features
+        print("conv outputs", conv_outputs)
+        num_filters_total = self.num_filters * len(self.kernel_sizes)  #
+        h_concat = tf.concat(conv_outputs, 3)  # across the filter dimension
+        result = tf.squeeze(h_concat, axis=1)  # remove the extra dimension
+
+        print("Result shape", result.shape)
+        result = tf.reshape(result, [-1, vec_len, num_filters_total])  # batch size, question or cont
+
+            # h_drop = tf.nn.dropout(h_reshaped, self.keep_prob)
+
+        return result
+
+class BiDAF(object):
+    """
+    Module for bidirectional attention flow.
+
+    """
+
+    def __init__(self, keep_prob, vec_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          vec_size: size of the word embeddings. int
+        """
+        self.keep_prob = keep_prob
+        self.vec_size = vec_size
+        self.S_W = tf.get_variable('S_W', [vec_size*3], tf.float32,
+            tf.contrib.layers.xavier_initializer())
+
+
+    def build_graph(self, q, q_mask, c, c_mask):
+        """
+        Inputs:
+          c: context matrix, shape: (batch_size, num_context_words, vec_size).
+          c_mask: Tensor shape (batch_size, num_context_words).
+            1s where there's real input, 0s where there's padding
+          q: question matrix (batch_size, num_question_words, vec_size)
+          q_mask: Tensor shape (batch_size, num_question_words).
+            1s where there's real input, 0s where there's padding
+          N = num_context_words
+          M = Num_question_words
+          vec_size = hidden_size * 2
+
+        Outputs:
+          output: Tensor shape (batch_size, N, vec_size*3).
+            This is the attention output.
+        """
+        with vs.variable_scope("BiDAF"):
+
+            # Calculating similarity matrix
+            c_expand = tf.expand_dims(c,2)  #[batch,N,1,2h]
+            print(c_expand)
+            q_expand = tf.expand_dims(q,1)  #[batch,1,M,2h]
+            print(q_expand)
+            c_pointWise_q = c_expand * q_expand  #[batch,N,M,2h]
+            print(c_pointWise_q)
+
+            c_input = tf.tile(c_expand, [1, 1, tf.shape(q)[1], 1])
+            q_input = tf.tile(q_expand, [1, tf.shape(c)[1], 1, 1])
+
+            concat_input = tf.concat([c_input, q_input, c_pointWise_q], -1) # [batch,N,M,6h]
+            print(concat_input)
+
+
+            similarity=tf.reduce_sum(concat_input * self.S_W, axis=3)  #[batch,N,M]
+            print(similarity)
+
+            # Calculating context to question attention
+            similarity_mask = tf.expand_dims(q_mask, 1) # shape (batch_size, 1, M)
+            print(similarity_mask)
+            _, c2q_dist = masked_softmax(similarity, similarity_mask, 2) # shape (batch_size, N, M). take softmax over q
+            print(c2q_dist)
+
+            # Use attention distribution to take weighted sum of values
+            c2q = tf.matmul(c2q_dist, q) # shape (batch_size, N, vec_size)
+            print(c2q)
+
+            # Calculating question to context attention c_dash
+            S_max = tf.reduce_max(similarity, axis=2) # shape (batch, N)
+            print(S_max)
+            _, c_dash_dist = masked_softmax(S_max, c_mask, 1) # distribution of shape (batch, N)
+            print(c_dash_dist)
+            c_dash_dist_expand = tf.expand_dims(c_dash_dist, 1) # shape (batch, 1, N)
+            print(c_dash_dist_expand)
+            c_dash = tf.matmul(c_dash_dist_expand, c) # shape (batch_size, 1, vec_size)
+            print(c_dash)
+
+            c_c2q = c * c2q # shape (batch, N, vec_size)
+            print(c_c2q)
+
+            c_c_dash = c * c_dash # shape (batch, N, vec_size)
+            print(c_c_dash)
+
+            # concatenate the output
+            output = tf.concat([c2q, c_c2q, c_c_dash], axis=2) # (batch_size, N, vec_size * 3)
+            print(output)
+
 
             # Apply dropout
-            out = tf.nn.dropout(out, self.keep_prob)
+            output = tf.nn.dropout(output, self.keep_prob)
+            print(output)
 
-            return out
+            return output
 
 
 class SimpleSoftmaxLayer(object):

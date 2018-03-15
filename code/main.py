@@ -47,8 +47,8 @@ tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 100, "Batch size to use")
-tf.app.flags.DEFINE_integer("hidden_size_encoder", 200, "Size of the hidden states")
+tf.app.flags.DEFINE_integer("batch_size", 60, "Batch size to use")
+tf.app.flags.DEFINE_integer("hidden_size_encoder", 150, "Size of the hidden states") #150 for bidaf ; #200 otherwise
 tf.app.flags.DEFINE_integer("hidden_size_qp_matching", 150, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("hidden_size_sm_matching", 50, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("hidden_size_fully_connected", 200, "Size of the hidden states")
@@ -60,23 +60,24 @@ tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained word 
 ## Bool flags to select different models
 tf.app.flags.DEFINE_bool("do_char_embed", True, "Include char embedding -True/False")
 tf.app.flags.DEFINE_bool("add_highway_layer", True, "Add highway layer to concatenated embeddings -True/False")
+tf.app.flags.DEFINE_bool("cnn_encoder", False, "Add CNN Encoder Layer -True/False")
 tf.app.flags.DEFINE_bool("rnet_attention", False, "Perform RNET QP and SM attention-True/False")
+tf.app.flags.DEFINE_bool("bidaf_attention", True, "Use BIDAF Attention-True/False")
 tf.app.flags.DEFINE_bool("answer_pointer_RNET", False, "Use Answer Pointer from RNET-True/False")
-tf.app.flags.DEFINE_bool("smart_span", False, "Select start and end idx based on smart conditions-True/False")
+tf.app.flags.DEFINE_bool("smart_span", True, "Select start and end idx based on smart conditions-True/False")
 
 ## Hyperparameters for Char CNN
-tf.app.flags.DEFINE_integer("char_embedding_size", 20, "Size of char embedding")  #as suggested in handout
-tf.app.flags.DEFINE_integer("word_max_len", 13, "max length for each word") # 99th percentile from Jupyter notebook
+tf.app.flags.DEFINE_integer("char_embedding_size", 8, "Size of char embedding")  #as suggested in handout
+tf.app.flags.DEFINE_integer("word_max_len", 16, "max length for each word") # 99th percentile from Jupyter notebook
 tf.app.flags.DEFINE_integer("char_out_size", 100, "num filters char CNN/out size") # same as filer size; as suggested in handout
 tf.app.flags.DEFINE_integer("window_width", 5, "Kernel size for char cnn") #as suggested in handout
 
 
 ## Hyperparameters for CNN Encoder
-tf.app.flags.DEFINE_integer("char_embedding_size", 20, "Size of char embedding")  #as suggested in handout
-tf.app.flags.DEFINE_integer("word_max_len", 13, "max length for each word") # 99th percentile from Jupyter notebook
-tf.app.flags.DEFINE_integer("char_out_size", 100, "num filters char CNN/out size") # same as filer size; as suggested in handout
-tf.app.flags.DEFINE_integer("window_width", 5, "Kernel size for char cnn") #as suggested in handout
+tf.app.flags.DEFINE_integer("filter_size_encoder", 20, "Size of filter for cnn encoder")
 
+## Hyperparameters for BIDAF
+tf.app.flags.DEFINE_integer("hidden_size_modeling", 100, "Size of modeling layer")  #
 
 # How often to print, save, eval
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
