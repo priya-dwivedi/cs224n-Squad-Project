@@ -617,7 +617,7 @@ I       Implement self matching from R-Net
 
 class Answer_Pointer(object):
     """
-    Implement Question Pooling and Answer Pointer
+    Implement Question Pooling and Answer Pointer from RNET - https://www.microsoft.com/en-us/research/wp-content/uploads/2017/05/r-net.pdf
     """
 
     def create_weights(self, size_in, size_out, name):

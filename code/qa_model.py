@@ -159,12 +159,7 @@ class QAModel(object):
             print("Shape context placeholder", self.char_ids_context.shape)
             print("Shape qn placeholder", self.char_ids_qn.shape)
 
-            # Get the word embeddings for the context and question
-
-            # using the placeholders self.context_ids and self.qn_ids
             self.context_char_embs = embedding_ops.embedding_lookup(char_emb_matrix, tf.reshape(self.char_ids_context, shape=(-1, self.FLAGS.word_max_len))) # shape (-1, word_max_len, char_embedding_size)
-            ## reshape to 4D tensor for convolution layer
-            # self.context_char_embs = tf.reshape(self.context_char_embs, shape=(-1,self.FLAGS.context_len, self.FLAGS.word_max_len, self.FLAGS.char_embedding_size))
 
             ##reshape to 3d tensor - compress dimensions we don't want to convolve on
             self.context_char_embs = tf.reshape(self.context_char_embs, shape=(
@@ -172,10 +167,8 @@ class QAModel(object):
 
             print("Shape context embs before conv", self.context_char_embs.shape)
 
-            ## Repeat for question embeddings - again reshape to 4D tensor
-            self.qn_char_embs = embedding_ops.embedding_lookup(char_emb_matrix, tf.reshape(self.char_ids_qn, shape=(-1, self.FLAGS.word_max_len))) # shape (batch_size, question_len, embedding_size)
-            # self.qn_char_embs = tf.reshape(self.qn_char_embs, shape=(-1,self.FLAGS.question_len, self.FLAGS.word_max_len, self.FLAGS.char_embedding_size))
-
+            ## Repeat for question embeddings - again reshape to 3D tensor
+            self.qn_char_embs = embedding_ops.embedding_lookup(char_emb_matrix, tf.reshape(self.char_ids_qn, shape=(-1, self.FLAGS.word_max_len)))
             self.qn_char_embs = tf.reshape(self.qn_char_embs, shape=(-1, self.FLAGS.word_max_len, self.FLAGS.char_embedding_size))
 
 
@@ -184,24 +177,6 @@ class QAModel(object):
             ## Now implement convolution. I decided to use conv2d through the function conv1d above since that was more intuitive
 
             self.context_emb_out = conv1d(input_= self.context_char_embs, output_size = self.FLAGS.char_out_size,  width =self.FLAGS.window_width , stride=1, scope_name='char-cnn')
-
-            # mu = 0
-            # sigma = 1.0
-            #
-            #
-            # conv1_w_shape = [self.FLAGS.window_width, self.FLAGS.char_embedding_size, self.FLAGS.char_out_size]  #3D tensor of shape window width, num_channels_in, num_channels_out
-            # conv1_W = tf.Variable(tf.truncated_normal(shape=(conv1_w_shape), mean=mu, stddev=sigma, dtype=tf.float32, name='conv1_w'))
-            # conv1_b = tf.Variable(tf.zeros(shape=(self.FLAGS.char_out_size), dtype=tf.float32, name='conv1_b'))
-            #
-            # self.context_emb_out =  tf.nn.conv1d(
-            #     value = self.context_char_embs ,
-            #     filters = conv1_W,
-            #     stride = 1,
-            #     padding = 'valid',
-            #     data_format='NWC'
-            # )  + conv1_b
-
-            # self.context_emb_out = tf.nn.conv2d(self.context_char_embs, conv1_W, strides=[1, 1, 1, 1], padding='VALID') + conv1_b
 
             self.context_emb_out = tf.nn.dropout(self.context_emb_out, self.keep_prob)
 
@@ -216,9 +191,6 @@ class QAModel(object):
             self.qn_emb_out = conv1d(input_=self.qn_char_embs, output_size=self.FLAGS.char_out_size,
                                           width=self.FLAGS.window_width, stride=1, scope_name='char-cnn') #reuse weights b/w context and ques conv layers
 
-            # self.qn_emb_out = tf.nn.conv2d(self.qn_char_embs, conv1_W, strides=[1, 1, 1, 1],
-            #                                     padding='VALID') + conv1_b
-
             self.qn_emb_out = tf.nn.dropout(self.qn_emb_out, self.keep_prob)
 
             print("Shape qn embs after conv", self.qn_emb_out.shape)
@@ -230,14 +202,6 @@ class QAModel(object):
                                                                            self.FLAGS.char_out_size))  # Desired shape is Batch_size, question_len, char_out_size
 
             print("Shape qn embs after pooling", self.qn_emb_out.shape)
-
-            # self.qn_emb_out = tf.layers.conv1d(self.qn_char_embs, filters=self.FLAGS.char_out_size,
-            #                                         kernel_size=self.FLAGS.window_width, padding='same',
-            #                                         name='conv1_qn', data_format='channels_last')
-            # self.qn_emb_out = tf.nn.dropout(self.qn_emb_out, self.keep_prob)
-            # self.qn_emb_out = tf.layers.max_pooling1d(self.qn_emb_out, pool_size=1, strides=1,
-            #                                                padding='valid')
-
 
             return self.context_emb_out, self.qn_emb_out
 
@@ -256,6 +220,8 @@ class QAModel(object):
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
 
+
+        ###################################################### CHAR EMBEDDING   #######################################
         if self.FLAGS.do_char_embed:
 
             self.context_emb_out, self.qn_emb_out = self.add_char_embeddings()
@@ -265,6 +231,7 @@ class QAModel(object):
             self.qn_embs = tf.concat((self.qn_embs, self.qn_emb_out), axis=2)
             print("Shape - concatenated qn embs", self.qn_embs.shape)
 
+        ###################################################### HIGHWAY LAYER   #######################################
         if self.FLAGS.add_highway_layer:
             last_dim_concat = self.context_embs.get_shape().as_list()[-1]
             for i in range(2):
@@ -273,10 +240,12 @@ class QAModel(object):
                 #reuse variables for qn_embs
                 self.qn_embs = self.highway(self.qn_embs, last_dim_concat, scope_name='highway', carry_bias=-1.0)
 
+        ###################################################### RNN ENCODER  #######################################
         encoder = RNNEncoder(self.FLAGS.hidden_size_encoder, self.keep_prob)
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask, scopename='RNNEncoder') # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask, scopename='RNNEncoder') # (batch_size, question_len, hidden_size*2)
 
+        ###################################################### CNN ENCODER  #######################################
         if self.FLAGS.cnn_encoder:
             ## Use CNN to also generate encodings
             cnn_encoder = CNNEncoder(self.FLAGS.filter_size_encoder, self.keep_prob)
@@ -292,6 +261,7 @@ class QAModel(object):
             question_hiddens = tf.concat((question_hiddens, ques_cnn_hiddens), axis = 2)   # Just use these output for now
             print("Shape - Context Hiddens", context_hiddens.shape)
 
+        ###################################################### RNET QUESTION CONTEXT ATTENTION and SELF ATTENTION  #######################################
         if self.FLAGS.rnet_attention:  ##perform Question Passage and Self Matching attention from R-Net
 
             rnet_layer = Attention_Match_RNN(self.keep_prob, self.FLAGS.hidden_size_encoder, self.FLAGS.hidden_size_qp_matching, self.FLAGS.hidden_size_sm_matching)
@@ -305,6 +275,7 @@ class QAModel(object):
             # Blended reps for R-Net
             blended_reps = tf.concat([context_hiddens, v_P, h_P], axis=2)  # (batch_size, context_len, hidden_size*6)
 
+        ###################################################### BIDAF ATTENTION AND MODELING LAYER  #######################################
         elif self.FLAGS.bidaf_attention:
 
             attn_layer = BiDAF(self.keep_prob, self.FLAGS.hidden_size_encoder * 2)
@@ -319,7 +290,7 @@ class QAModel(object):
 
             blended_reps = attention_hidden # for the final layer
 
-
+        ###################################################### BASELINE DOT PRODUCT ATTENTION  #######################################
         else: ## perform baseline dot product attention
 
             # Use context hidden states to attend to question hidden states - Basic Attention
@@ -336,7 +307,7 @@ class QAModel(object):
             # Concat attn_output to context_hiddens to get blended_reps
             blended_reps = tf.concat([context_hiddens, attn_output], axis=2)  # (batch_size, context_len, hidden_size*4)
 
-
+        ###################################################### RNET QUESTION POOLING and ANSWER POINTER  #######################################
         if self.FLAGS.answer_pointer_RNET:  ##Use Answer Pointer Module from R-Net
 
             if self.FLAGS.rnet_attention:
@@ -359,6 +330,7 @@ class QAModel(object):
             self.logits_end = logits[1]
             self.probdist_end = p[1]
 
+        ###################################################### BASELINE FULLY CONNECTED ANSWER PREDICTION  #######################################
         else: # Use baseline fully connected for answer start and end prediction
 
             # Apply fully connected layer to each blended representation
@@ -526,7 +498,7 @@ class QAModel(object):
         """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
         start_dist, end_dist = self.get_prob_dists(session, batch)
-
+        ###################################################### SMARTER SPAN SELECTION  #######################################
         if self.FLAGS.smart_span:
 
             curr_batch_size = batch.batch_size
