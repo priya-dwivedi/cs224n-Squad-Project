@@ -1,0 +1,27 @@
+
+## PROB Files
+python code/main_ensemble.py --experiment_name=bidaf_best --dropout=0.15 --batch_size=60 --hidden_size_encoder=150 --embedding_size=100 --do_char_embed=False --add_highway_layer=True --rnet_attention=False --bidaf_attention=True --answer_pointer_RNET=False --smart_span=True --hidden_size_modeling=150 --mode=official_eval \
+--json_in_path=data/tiny-dev.json \
+--json_out_path=predictions_bidaf_prob.json \
+--ckpt_load_dir=experiments/bidaf_best/best_checkpoint
+
+
+python code/main_ensemble.py --experiment_name=rnet_span --dropout=0.20 --batch_size=20 --hidden_size_encoder=200 --embedding_size=300 --do_char_embed=False --add_highway_layer=False --rnet_attention=True --bidaf_attention=False --answer_pointer_RNET=True --smart_span=True --mode=official_eval \
+--json_in_path=data/tiny-dev.json \
+--json_out_path=predictions_rnet_prob.json \
+--ckpt_load_dir=experiments/rnet_span/best_checkpoint
+
+
+## Regular JSON Files without prob
+
+python code/main.py --experiment_name=bidaf_best --dropout=0.15 --batch_size=60 --hidden_size_encoder=150 --embedding_size=100 --do_char_embed=False --add_highway_layer=True --rnet_attention=False --bidaf_attention=True --answer_pointer_RNET=False --smart_span=True --hidden_size_modeling=150 --mode=official_eval \
+--json_in_path=data/tiny-dev.json \
+--json_out_path=predictions_bidaf.json \
+--ckpt_load_dir=experiments/bidaf_best/best_checkpoint
+
+
+python code/main.py --experiment_name=rnet_span --dropout=0.20 --batch_size=20 --hidden_size_encoder=200 --embedding_size=300 --do_char_embed=False --add_highway_layer=False --rnet_attention=True --bidaf_attention=False --answer_pointer_RNET=True --smart_span=True --mode=official_eval \
+--json_in_path=data/tiny-dev.json \
+--json_out_path=predictions_rnet.json \
+--ckpt_load_dir=experiments/rnet_span/best_checkpoint
+

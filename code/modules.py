@@ -90,7 +90,7 @@ class CNNEncoder(object):
         """
         self.num_filters = num_filters
         self.keep_prob = keep_prob
-        self.kernel_sizes = [2,3,4,5,6,7,8,9,15,20]
+        self.kernel_sizes = [2,3,4,5,6,7]
 
 
     ## Helper function to create conv1d layer
@@ -146,7 +146,7 @@ class CNNEncoder(object):
                 if i ==0: # first convolution
                     input_shape = inputs_expanded.get_shape().as_list()
                     filter_shape = [1, filter_size, input_shape[-1], self.num_filters]
-                    W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.1), name="W")
+                    W = tf.Variable(tf.truncated_normal(filter_shape, stddev=0.01), name="W")
                     b = tf.Variable(tf.constant(0.1, shape=[self.num_filters]), name="b")
                     conv = tf.nn.conv2d(
                         inputs_expanded,

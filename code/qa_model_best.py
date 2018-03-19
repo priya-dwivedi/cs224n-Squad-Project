@@ -258,11 +258,8 @@ class QAModel(object):
             print("Shape - Ques Encoder output", ques_cnn_hiddens.shape)
 
             ## concat these vectors
-
-            context_hiddens = context_cnn_hiddens
-            question_hiddens = ques_cnn_hiddens
-            # context_hiddens = tf.concat((context_hiddens, context_cnn_hiddens), axis = 2)  # Just use these output for now. Ignore the RNN output
-            # question_hiddens = tf.concat((question_hiddens, ques_cnn_hiddens), axis = 2)   # Just use these output for now
+            context_hiddens = tf.concat((context_hiddens, context_cnn_hiddens), axis = 2)  # Just use these output for now. Ignore the RNN output
+            question_hiddens = tf.concat((question_hiddens, ques_cnn_hiddens), axis = 2)   # Just use these output for now
             print("Shape - Context Hiddens", context_hiddens.shape)
 
         ###################################################### RNET QUESTION CONTEXT ATTENTION and SELF ATTENTION  #######################################
@@ -272,13 +269,6 @@ class QAModel(object):
 
            # Implement better question_passage matching
             v_P = rnet_layer.build_graph_qp_matching(context_hiddens, question_hiddens, self.qn_mask, self.context_mask, self.FLAGS.context_len, self.FLAGS.question_len)
-
-            self.rnet_attention = v_P
-
-            self.rnet_attention = tf.squeeze(self.rnet_attention, axis=[2])  # shape (batch_size, seq_len)
-
-            # Take softmax over sequence
-            _, self.rnet_attention_probs = masked_softmax(self.rnet_attention, self.context_mask, 1)
 
             h_P = rnet_layer.build_graph_sm_matching(context_hiddens, question_hiddens, self.qn_mask, self.context_mask,
                                                      self.FLAGS.context_len, self.FLAGS.question_len, v_P)
@@ -292,15 +282,6 @@ class QAModel(object):
             attn_layer = BiDAF(self.keep_prob, self.FLAGS.hidden_size_encoder * 2)
             attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens,
                                                  self.context_mask)  # attn_output is shape (batch_size, context_len, hidden_size_encoder*6)
-
-            self.bidaf_attention = attn_output
-            self.bidaf_attention = tf.reduce_max(self.bidaf_attention, axis=2)  # shape (batch_size, seq_len)
-            print("Shape bidaf before softmax", self.bidaf_attention.shape)
-
-            # Take softmax over sequence
-            _, self.bidaf_attention_probs = masked_softmax(self.bidaf_attention, self.context_mask, 1)  ## for plotting purpose
-
-
             blended_reps = tf.concat([context_hiddens, attn_output], axis=2)  # (batch_size, context_len, hidden_size_encoder*8)
 
             ## add a modeling layer
@@ -333,10 +314,6 @@ class QAModel(object):
             if self.FLAGS.rnet_attention:
                 # different attention size for R-Net final layer
                 hidden_size_attn = 2 * self.FLAGS.hidden_size_encoder + self.FLAGS.hidden_size_qp_matching + 2 * self.FLAGS.hidden_size_sm_matching  # combined size of blended reps
-
-            elif self.FLAGS.bidaf_attention:
-                hidden_size_attn = 2*self.FLAGS.hidden_size_modeling
-
             else:
                 hidden_size_attn = 4 * self.FLAGS.hidden_size_encoder # Final attention size for baseline model
 
@@ -522,14 +499,12 @@ class QAModel(object):
         """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
         start_dist, end_dist = self.get_prob_dists(session, batch)
-        maxprob = 0
         ###################################################### SMARTER SPAN SELECTION  #######################################
         if self.FLAGS.smart_span:
 
             curr_batch_size = batch.batch_size
             start_pos = np.empty(shape = (curr_batch_size), dtype=int)
             end_pos = np.empty(shape=(curr_batch_size), dtype=int)
-            maxprob = np.empty(shape=(curr_batch_size), dtype=float)
 
             for j in range(curr_batch_size):  # for each row
             ## Take argmax of start and end dist in a window such that  i <= j <= i + 15
@@ -542,7 +517,6 @@ class QAModel(object):
                     end_idx = np.argmax(end_dist_subset)
                     start_prob = start_dist[j,i]
                     prod = end_prob_max*start_prob
-                    # print("Prod: ", prod)
 
                     # print("Shape end, start:", end_prob_max.shape, start_prob.shape)
 
@@ -555,7 +529,6 @@ class QAModel(object):
                 # end_idx = np.argmax(end_dist[j:chosen_start:chosen_start+16])
                 # print("Chosen end", chosen_start+end_idx)
                 end_pos[j] = chosen_end
-                maxprob[j] = round(maxprod,4)
 
                 ## add sanity check
                 delta = end_pos[j] - start_pos[j]
@@ -564,7 +537,6 @@ class QAModel(object):
 
                 # print("Shape end, start matrix:", start_pos.shape, end_pos.shape)
                 # print("Start and end matrix:", start_pos,  end_pos)
-                # print("Maxprob: ", maxprob.shape, maxprob)
 
         else:
 
@@ -572,31 +544,7 @@ class QAModel(object):
             start_pos = np.argmax(start_dist, axis=1)
             end_pos = np.argmax(end_dist, axis=1)
 
-        return start_pos, end_pos, maxprob
-
-    def get_attention_dist(self, session, batch):
-
-        # input_feed = {}
-        # input_feed[self.context_ids] = batch.context_ids
-        # input_feed[self.context_mask] = batch.context_mask
-        # input_feed[self.qn_ids] = batch.qn_ids
-        # input_feed[self.qn_mask] = batch.qn_mask
-        # if self.FLAGS.do_char_embed:
-        #     input_feed[self.char_ids_context] = self.padded_char_ids(batch, batch.context_ids)
-        #     input_feed[self.char_ids_qn] = self.padded_char_ids(batch, batch.qn_ids)
-        #
-        #
-        # if self.FLAGS.rnet_attention:
-        #     output_feed = [self.rnet_attention_probs]
-        #
-        # elif self.FLAGS.bidaf_attention:
-        #     output_feed = [self.bidaf_attention_probs]
-        #
-        # [attn_distribution] = session.run(output_feed, input_feed)
-
-        start_dist, end_dist = self.get_prob_dists(session, batch)
-
-        return start_dist
+        return start_pos, end_pos
 
     ## Helper Functions for Char CNN
 
@@ -762,7 +710,7 @@ class QAModel(object):
         # That means we're truncating, rather than discarding, examples with too-long context or questions
         for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=False):
 
-            pred_start_pos, pred_end_pos, _ = self.get_start_end_pos(session, batch)
+            pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size

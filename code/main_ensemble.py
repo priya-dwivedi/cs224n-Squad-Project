@@ -47,8 +47,8 @@ tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 60, "Batch size to use")
-tf.app.flags.DEFINE_integer("hidden_size_encoder", 150, "Size of the hidden states") #150 for bidaf ; #200 otherwise
+tf.app.flags.DEFINE_integer("batch_size", 20, "Batch size to use")
+tf.app.flags.DEFINE_integer("hidden_size_encoder", 200, "Size of the hidden states") #150 for bidaf ; #200 otherwise
 tf.app.flags.DEFINE_integer("hidden_size_qp_matching", 150, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("hidden_size_sm_matching", 50, "Size of the hidden states")
 tf.app.flags.DEFINE_integer("hidden_size_fully_connected", 200, "Size of the hidden states")
@@ -58,12 +58,12 @@ tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained word 
 
 
 ## Bool flags to select different models
-tf.app.flags.DEFINE_bool("do_char_embed", False, "Include char embedding -True/False")
+tf.app.flags.DEFINE_bool("do_char_embed", True, "Include char embedding -True/False")
 tf.app.flags.DEFINE_bool("add_highway_layer", True, "Add highway layer to concatenated embeddings -True/False")
 tf.app.flags.DEFINE_bool("cnn_encoder", False, "Add CNN Encoder Layer -True/False")
-tf.app.flags.DEFINE_bool("rnet_attention", False, "Perform RNET QP and SM attention-True/False")
-tf.app.flags.DEFINE_bool("bidaf_attention", True, "Use BIDAF Attention-True/False")
-tf.app.flags.DEFINE_bool("answer_pointer_RNET", False, "Use Answer Pointer from RNET-True/False")
+tf.app.flags.DEFINE_bool("rnet_attention", True, "Perform RNET QP and SM attention-True/False")
+tf.app.flags.DEFINE_bool("bidaf_attention", False, "Use BIDAF Attention-True/False")
+tf.app.flags.DEFINE_bool("answer_pointer_RNET", True, "Use Answer Pointer from RNET-True/False")
 tf.app.flags.DEFINE_bool("smart_span", True, "Select start and end idx based on smart conditions-True/False")
 
 ## Hyperparameters for Char CNN
@@ -74,7 +74,7 @@ tf.app.flags.DEFINE_integer("window_width", 5, "Kernel size for char cnn") #as s
 
 
 ## Hyperparameters for CNN Encoder
-tf.app.flags.DEFINE_integer("filter_size_encoder", 50, "Size of filter for cnn encoder")
+tf.app.flags.DEFINE_integer("filter_size_encoder", 20, "Size of filter for cnn encoder")
 
 ## Hyperparameters for BIDAF
 tf.app.flags.DEFINE_integer("hidden_size_modeling", 150, "Size of modeling layer")  #
@@ -216,7 +216,7 @@ def main(unused_argv):
 
             # Get a predicted answer for each example in the data
             # Return a mapping answers_dict from uuid to answer
-            answers_dict = generate_answers(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
+            answers_dict = generate_answers_prob(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
 
             # Write the uuid->answer mapping a to json file in root dir
             print "Writing predictions to %s..." % FLAGS.json_out_path

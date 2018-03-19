@@ -1,0 +1,7 @@
+colorama==0.3.9
+nltk==3.2.5
+numpy==1.14.0
+six==1.11.0
+tensorflow-gpu==1.4.1  # Change to tensorflow==1.4.1 if you need to run CPU-only tensorflow (e.g. on your laptop)
+tensorflow-tensorboard==0.4.0
+tqdm==4.19.5

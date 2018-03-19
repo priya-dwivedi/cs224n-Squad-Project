@@ -27,7 +27,7 @@ import tensorflow as tf
 
 from qa_model import QAModel
 from vocab import get_glove
-from official_eval_helper import get_json_data, generate_answers, generate_answers_prob
+from official_eval_helper import get_json_data, generate_answers, generate_answers_prob, generate_answers_attention
 
 
 logging.basicConfig(level=logging.INFO)
@@ -39,7 +39,7 @@ EXPERIMENTS_DIR = os.path.join(MAIN_DIR, "experiments") # relative path of exper
 
 # High-level options
 tf.app.flags.DEFINE_integer("gpu", 0, "Which GPU to use, if you have multiple.")
-tf.app.flags.DEFINE_string("mode", "train", "Available modes: train / show_examples / official_eval")
+tf.app.flags.DEFINE_string("mode", "train", "Available modes: train / show_examples / official_eval / plot_attention")
 tf.app.flags.DEFINE_string("experiment_name", "", "Unique name for your experiment. This will create a directory by this name in the experiments/ directory, which will hold all data related to this experiment")
 tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means train indefinitely")
 
@@ -74,7 +74,7 @@ tf.app.flags.DEFINE_integer("window_width", 5, "Kernel size for char cnn") #as s
 
 
 ## Hyperparameters for CNN Encoder
-tf.app.flags.DEFINE_integer("filter_size_encoder", 50, "Size of filter for cnn encoder")
+tf.app.flags.DEFINE_integer("filter_size_encoder", 20, "Size of filter for cnn encoder")
 
 ## Hyperparameters for BIDAF
 tf.app.flags.DEFINE_integer("hidden_size_modeling", 150, "Size of modeling layer")  #
@@ -217,6 +217,32 @@ def main(unused_argv):
             # Get a predicted answer for each example in the data
             # Return a mapping answers_dict from uuid to answer
             answers_dict = generate_answers(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
+
+            # Write the uuid->answer mapping a to json file in root dir
+            print "Writing predictions to %s..." % FLAGS.json_out_path
+            with io.open(FLAGS.json_out_path, 'w', encoding='utf-8') as f:
+                f.write(unicode(json.dumps(answers_dict, ensure_ascii=False)))
+                print "Wrote predictions to %s" % FLAGS.json_out_path
+
+
+    elif FLAGS.mode == 'plot_attention':
+
+        if FLAGS.json_in_path == "":
+            raise Exception("For official_eval mode, you need to specify --json_in_path")
+        if FLAGS.ckpt_load_dir == "":
+            raise Exception("For official_eval mode, you need to specify --ckpt_load_dir")
+
+        # Read the JSON data from file
+        qn_uuid_data, context_token_data, qn_token_data = get_json_data(FLAGS.json_in_path)
+
+        with tf.Session(config=config) as sess:
+
+            # Load model from ckpt_load_dir
+            initialize_model(sess, qa_model, FLAGS.ckpt_load_dir, expect_exists=True)
+
+            # Get a predicted answer for each example in the data
+            # Return a mapping answers_dict from uuid to answer
+            answers_dict = generate_answers_attention(sess, qa_model, word2id, qn_uuid_data, context_token_data, qn_token_data)
 
             # Write the uuid->answer mapping a to json file in root dir
             print "Writing predictions to %s..." % FLAGS.json_out_path
