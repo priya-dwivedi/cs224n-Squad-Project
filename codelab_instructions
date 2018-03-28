@@ -1,8 +1,0 @@
-
-Evaluate Locally on Tiny Json
-
-python code/main.py --experiment_name=rnet_sm --mode=official_eval \
---json_in_path=data/tiny-dev.json \
---ckpt_load_dir=experiments/rnet_sm/best_checkpoint
-
-python code/evaluate.py data/tiny-dev.json predictions.json
