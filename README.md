@@ -4,8 +4,8 @@ This repository has the code to run the model my team built for the SQUaD datase
 
 ### Running the code
 
-* Please run ./get_started.sh to download the SQuAD dataset and GloVE Vectors
-requirements.txt is used by get_started.sh to install requirements.Once the script is done running, you will have a new directory data with the train and dev json files for SQuAD datset
+* Please run ```./get_started.sh``` to download the SQuAD dataset and GloVE Vectors
+* requirements.txt is used by get_started.sh to install requirements. Once the script is done running, you will have a new directory data with the train and dev json files for SQuAD datset. And another empty folder experiments that will eventually have the results from your experiments. 
 
 * To run code please run main.py in code. The settings to run BIDAF model are:
 ```
@@ -23,3 +23,8 @@ python code/main.py --experiment_name=rnet_best --dropout=0.20 --batch_size=20 -
 
 * Once you run the models, you will have a new folder by the name experiments which will have the results from your code runs
 
+* To start tensorboard, please run the following commands:
+```
+cd experiments # Go to experiments directory
+tensorboard --logdir=. --port=5678 # Start TensorBoard
+```
