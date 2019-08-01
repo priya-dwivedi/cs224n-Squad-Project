@@ -23,7 +23,7 @@ import json
 import sys
 import logging
 
-import tensorflow as tf
+import tensorflow-gpu as tf
 
 from qa_model import QAModel
 from vocab import get_glove
